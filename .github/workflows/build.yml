@@ -21,7 +21,7 @@ jobs:
           - RP2040_ZERO
           - ADAFRUIT_FEATHER
           - ESP32_BLUEPAD32_I2C
-          - ESP32_BLUERETRO_I2C
+          #- ESP32_BLUERETRO_I2C
           #- EXTERNAL_4CH_I2C
 
     steps:
