@@ -16,8 +16,6 @@ jobs:
         board:
           - PI_PICOW
           - PI_PICO2W
-          - ESP32_BLUEPAD32_I2C
-          - ESP32_BLUERETRO_I2C
 
     steps:
       - uses: actions/checkout@v4

@@ -44,12 +44,12 @@ static constexpr uint32_t BT_INPUT_STALL_DISCONNECT_MS = 8000;
 static constexpr uint32_t XBOX_BLE_KEEPALIVE_MS = 12000;
 
 /** One-second rumble when a pad becomes ready so the user knows it is connected. */
-static constexpr uint16_t CONNECT_RUMBLE_DURATION_MS = 1000;
+static constexpr uint16_t CONNECT_RUMBLE_DURATION_MS = 2000;
 static constexpr uint8_t CONNECT_RUMBLE_WEAK = 160;
 static constexpr uint8_t CONNECT_RUMBLE_STRONG = 160;
 /** DS4: defer FF slightly — early output reports can destabilize the link (see s_ps4_rumble_ok_ms). */
 static constexpr uint16_t CONNECT_RUMBLE_DELAY_PS4_MS = 1200;
-static constexpr uint16_t CONNECT_RUMBLE_DELAY_DEFAULT_MS = 600;
+static constexpr uint16_t CONNECT_RUMBLE_DELAY_DEFAULT_MS = 300;
 
 static uint32_t s_last_bt_input_ms[MAX_GAMEPADS]{};
 static uint32_t s_xbox_ble_ka_last_ms[MAX_GAMEPADS]{};
@@ -434,11 +434,9 @@ static uni_error_t device_ready_cb(uni_hid_device_t* device) {
     }
 
     if (led_timer_set_) {
-        if (board_api::usb::host_connected() == false) {
-            led_timer_set_ = false;
-            btstack_run_loop_remove_timer(&led_timer_);
-            board_api::set_led(true);
-        }
+        led_timer_set_ = false;
+        btstack_run_loop_remove_timer(&led_timer_);
+        board_api::set_led(true);
     }
     if (!feedback_timer_set_) {
         feedback_timer_set_ = true;
@@ -448,7 +446,9 @@ static uni_error_t device_ready_cb(uni_hid_device_t* device) {
         btstack_run_loop_add_timer(&feedback_timer_);
     }
 
-    ogxm_play_connection_rumble(device);
+    if (board_api::usb::host_connected() == false) {
+        ogxm_play_connection_rumble(device);
+    }
 
     return UNI_ERROR_SUCCESS;
 }
