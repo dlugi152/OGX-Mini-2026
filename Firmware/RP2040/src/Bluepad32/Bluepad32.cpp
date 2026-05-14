@@ -434,7 +434,7 @@ static uni_error_t device_ready_cb(uni_hid_device_t* device) {
     }
 
     if (led_timer_set_) {
-        if (board_apiusbhost_connected() == false) {
+        if (board_api::usb::host_connected() == false) {
             led_timer_set_ = false;
             btstack_run_loop_remove_timer(&led_timer_);
             board_api::set_led(true);
