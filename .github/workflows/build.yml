@@ -16,6 +16,8 @@ jobs:
         board:
           - PI_PICOW
           - PI_PICO2W
+          - ESP32_BLUEPAD32_I2C
+          - ESP32_BLUERETRO_I2C
 
     steps:
       - uses: actions/checkout@v4
@@ -38,12 +40,13 @@ jobs:
           cmake -DPICO_SDK_PATH=${{ github.workspace }}/pico-sdk \
                 -DCMAKE_BUILD_TYPE=Release \
                 -DOGXM_BOARD=${{ matrix.board }} \
-                -DMAX_GAMEPADS=1 \
+                -DMAX_GAMEPADS=4 \
+                -DOGXM_FIXED_DRIVER=PS3 \
                 ../Firmware/RP2040
           cmake --build .
 
           # Move the generated .uf2 file to output/ without knowing the exact version
-          FILE=$(find . -maxdepth 1 -name "OGX-Mini-*-${{ matrix.board }}.uf2" | head -n 1)
+          FILE=$(find . -maxdepth 1 -name "OGX-Mini-*-${{ matrix.board }}-Multi.uf2" | head -n 1)
           cp "$FILE" ../output/
 
       - name: Upload UF2 Artifact
