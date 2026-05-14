@@ -6,6 +6,9 @@
 #include <pico/cyw43_arch.h>
 #include <pico/time.h>
 
+#include <hardware/regs/usb.h>
+#include <hardware/structs/usb.h>
+
 #include <btstack.h>
 #include "btstack_run_loop.h"
 #include "gap.h"
@@ -446,8 +449,18 @@ static uni_error_t device_ready_cb(uni_hid_device_t* device) {
         btstack_run_loop_add_timer(&feedback_timer_);
     }
 
-    if (board_api::usb::host_any_pad_mounted() == false) {
-        ogxm_play_connection_rumble(device);
+    // Mux the controller to the onboard usb phy
+    usb_hw->muxing = USB_USB_MUXING_TO_PHY_BITS | USB_USB_MUXING_SOFTCON_BITS;
+    usb_hw->sie_ctrl = USB_SIE_CTRL_PULLUP_EN_BITS;
+
+    // Check if the USB is connected for 10ms
+    for (unsigned u = 0; u < 10; u++)
+    {
+        if ((usb_hw->phy_direct & (USB_USBPHY_DIRECT_RX_DP_BITS | USB_USBPHY_DIRECT_RX_DM_BITS)) == USB_USBPHY_DIRECT_RX_DP_BITS)
+        {
+            ogxm_play_connection_rumble(device);
+        }
+        busy_wait_ms(1);
     }
 
     return UNI_ERROR_SUCCESS;
