@@ -446,7 +446,7 @@ static uni_error_t device_ready_cb(uni_hid_device_t* device) {
         btstack_run_loop_add_timer(&feedback_timer_);
     }
 
-    if (board_api::usb::host_connected() == false) {
+    if (board_api::usb::host_any_pad_mounted() == false) {
         ogxm_play_connection_rumble(device);
     }
 
