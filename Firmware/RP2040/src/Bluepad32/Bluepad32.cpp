@@ -24,7 +24,6 @@ static std::atomic<bool> s_bt_any_connected_cached{false};
 #endif
 
 #include "Bluepad32/Bluepad32.h"
-#include "tusb.h"
 #include "Board/board_api.h"
 #include "Board/ogxm_log.h"
 
@@ -447,11 +446,7 @@ static uni_error_t device_ready_cb(uni_hid_device_t* device) {
         btstack_run_loop_add_timer(&feedback_timer_);
     }
 
-    // Software-only check: only play connection rumble if USB device stack has a host and HID is ready.
-
-    if (tud_hid_ready()) {
-        ogxm_play_connection_rumble(device);
-    }
+    //ogxm_play_connection_rumble(device);
 
     return UNI_ERROR_SUCCESS;
 }
