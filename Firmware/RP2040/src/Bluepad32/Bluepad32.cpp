@@ -26,6 +26,7 @@ static std::atomic<bool> s_bt_any_connected_cached{false};
 #include "Bluepad32/Bluepad32.h"
 #include "Board/board_api.h"
 #include "Board/ogxm_log.h"
+#include "UserSettings/NVSTool.h"
 
 #ifndef CONFIG_BLUEPAD32_PLATFORM_CUSTOM
     #error "Pico W must use BLUEPAD32_PLATFORM_CUSTOM"
@@ -68,6 +69,80 @@ btstack_timer_source_t feedback_timer_;
 btstack_timer_source_t led_timer_;
 bool led_timer_set_{false};
 bool feedback_timer_set_{false};
+
+/* Known Bluetooth addresses persisted in flash. Stored as raw 6-byte bd_addr_t values under keys
+ * "bp_known_0", "bp_known_1", ... up to MAX_GAMEPADS-1. */
+static bd_addr_t known_addrs[MAX_GAMEPADS];
+static uint8_t known_count = 0;
+static bool pairing_open = false; // when true, accept unknown devices for one pairing slot
+
+static std::string known_key_for_index(int i) {
+    return std::string("bp_known_") + std::to_string(i);
+}
+
+static void clear_known_addrs() {
+    NVSTool& nvs = NVSTool::get_instance();
+    bd_addr_t ff;
+    for (int i = 0; i < 6; ++i) ff[i] = 0xFF;
+    for (int i = 0; i < MAX_GAMEPADS; ++i) {
+        std::string key = known_key_for_index(i);
+        nvs.write(key, ff, sizeof(ff));
+        std::memset(known_addrs[i], 0xFF, sizeof(bd_addr_t));
+    }
+    known_count = 0;
+    pairing_open = true;
+    OGXM_LOG("Bluepad32: cleared known addresses\n");
+}
+
+static bool bd_addr_is_empty(const bd_addr_t a) {
+    for (int i = 0; i < 6; ++i) if (a[i] != 0xFF && a[i] != 0x00) return false;
+    return true;
+}
+
+static bool is_addr_known(const bd_addr_t addr) {
+    for (uint8_t i = 0; i < MAX_GAMEPADS; ++i) {
+        if (!bd_addr_is_empty(known_addrs[i]) && std::memcmp(known_addrs[i], addr, 6) == 0) return true;
+    }
+    return false;
+}
+
+static void load_known_addrs() {
+    NVSTool& nvs = NVSTool::get_instance();
+    known_count = 0;
+    for (int i = 0; i < MAX_GAMEPADS; ++i) {
+        bd_addr_t buf{};
+        std::string key = known_key_for_index(i);
+        if (nvs.read(key, buf, sizeof(buf))) {
+            // store
+            std::memcpy(known_addrs[i], buf, sizeof(buf));
+            if (!bd_addr_is_empty(known_addrs[i])) known_count++;
+        } else {
+            // mark empty
+            std::memset(known_addrs[i], 0xFF, sizeof(bd_addr_t));
+        }
+    }
+    pairing_open = (known_count == 0);
+    OGXM_LOG("Bluepad32: loaded known_addrs count=" + std::to_string((int)known_count) + " pairing_open=" + std::to_string(pairing_open) + "\n");
+}
+
+static bool save_known_addr(const bd_addr_t addr) {
+    if (is_addr_known(addr)) return true;
+    if (known_count >= MAX_GAMEPADS) return false;
+    NVSTool& nvs = NVSTool::get_instance();
+    for (int i = 0; i < MAX_GAMEPADS; ++i) {
+        if (bd_addr_is_empty(known_addrs[i])) {
+            std::string key = known_key_for_index(i);
+            if (nvs.write(key, addr, 6)) {
+                std::memcpy(known_addrs[i], addr, 6);
+                known_count++;
+                OGXM_LOG("Bluepad32: saved known addr index=" + std::to_string(i) + "\n");
+                return true;
+            }
+            return false;
+        }
+    }
+    return false;
+}
 
 static constexpr uint32_t GPIO_PROCESS_INTERVAL_MS = 4;
 static btstack_timer_source_t gpio_process_timer_;
@@ -283,6 +358,14 @@ static uni_error_t device_discovered_cb(bd_addr_t addr, const char* name, uint16
         return UNI_ERROR_IGNORE_DEVICE;
     }
 
+    // If we already have known addresses saved and pairing is closed, only accept known devices.
+    if (!pairing_open && known_count > 0) {
+        if (!uni_hid_device_get_instance_for_address(addr) && !is_addr_known(addr)) {
+            OGXM_LOG("Bluepad32: ignoring unknown discovered device while pairing closed\n");
+            return UNI_ERROR_IGNORE_DEVICE;
+        }
+    }
+
     return UNI_ERROR_SUCCESS;
 }
 
@@ -370,6 +453,12 @@ static void device_disconnected_cb(uni_hid_device_t* device) {
     if (!any_other_connected) {
         uni_bt_enable_new_connections_unsafe(true);
     }
+
+    // If the disconnected device was one of the known ones and now there is room for new known devices,
+    // allow pairing again (open pairing) so new devices can be added.
+    if (known_count < MAX_GAMEPADS) {
+        pairing_open = true;
+    }
 }
 
 static void ogxm_play_connection_rumble(uni_hid_device_t* device)
@@ -446,7 +535,19 @@ static uni_error_t device_ready_cb(uni_hid_device_t* device) {
         btstack_run_loop_add_timer(&feedback_timer_);
     }
 
-    //ogxm_play_connection_rumble(device);
+    ogxm_play_connection_rumble(device);
+
+    // Persist known device address if pairing is open and it's a new device
+    bd_addr_t addr;
+    uni_bt_conn_get_address(&device->conn, addr);
+    if (pairing_open && !is_addr_known(addr)) {
+        if (save_known_addr(addr)) {
+            // If after saving we fill up known slots, close pairing
+            if (known_count >= MAX_GAMEPADS) pairing_open = false;
+        }
+        // After first known device is saved, close pairing to accept only known devices until disconnection
+        pairing_open = false;
+    }
 
     return UNI_ERROR_SUCCESS;
 }
@@ -547,6 +648,7 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
 
     // Check for disconnect combo: Start+Select for most controllers, L3+R3 for OUYA (no Start/Select)
     static uint32_t disconnect_combo_hold_time[MAX_GAMEPADS] = {0};
+    static uint32_t clear_combo_hold_time[MAX_GAMEPADS] = {0};
     const uint32_t now_cb = to_ms_since_boot(get_absolute_time());
     const bool combo_grace =
         (idx >= 0 && idx < MAX_GAMEPADS && now_cb < s_bt_disconnect_combo_grace_until_ms[idx]);
@@ -568,6 +670,22 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
         }
     } else {
         disconnect_combo_hold_time[idx] = 0;
+    }
+
+    // Clear known pads combo: Start + LB + RB + B
+    bool clear_combo_pressed = (uni_gp->misc_buttons & MISC_BUTTON_START) &&
+                               (uni_gp->buttons & BUTTON_SHOULDER_L) &&
+                               (uni_gp->buttons & BUTTON_SHOULDER_R) &&
+                               (uni_gp->buttons & BUTTON_B);
+    if (clear_combo_pressed) {
+        clear_combo_hold_time[idx]++;
+        if (clear_combo_hold_time[idx] >= 30) {
+            OGXM_LOG("Bluepad32: clear-known-pads combo detected, clearing known addresses\n");
+            clear_known_addrs();
+            clear_combo_hold_time[idx] = 0;
+        }
+    } else {
+        clear_combo_hold_time[idx] = 0;
     }
 
     // Prefer analog triggers (brake / throttle) when present, but fall back to
@@ -684,6 +802,7 @@ void wired_usb_release_enable_bt_pairing() {
 
 void init(Gamepad(&gamepads)[MAX_GAMEPADS])
 {
+    load_known_addrs();
     for (uint8_t i = 0; i < MAX_GAMEPADS; ++i)
     {
         bt_devices_[i].gamepad = &gamepads[i];
