@@ -23,6 +23,23 @@ void init() {
         inited.store(true);
         OGXM_LOG("board_api_bt: CYW43 init OK\n");
     }
+
+#if defined(CONFIG_TARGET_PICO_W)
+void board_api_bt::connect_wifi(const char* ssid, const char* pass) {
+    // Blocking connect using cyw43_arch APIs. This is simplified example code.
+    OGXM_LOG("board_api_bt: attempting wifi connect\n");
+    cyw43_arch_init();
+    // Use default interface and station mode
+    cyw43_arch_enable_sta_mode();
+    // Attempt join (blocking call may be platform-specific)
+    int rc = cyw43_arch_wifi_connect_timeout_ms(ssid, pass, CYW43_AUTH_WPA2_AES_PSK, 10000);
+    if (rc == 0) {
+        OGXM_LOG("board_api_bt: wifi connected\n");
+    } else {
+        OGXM_LOG("board_api_bt: wifi connect failed\n");
+    }
+}
+#endif
 }
 
 void set_led(bool state) {

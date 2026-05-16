@@ -26,6 +26,14 @@ static std::atomic<bool> s_bt_any_connected_cached{false};
 #include "Bluepad32/Bluepad32.h"
 #include "Board/board_api.h"
 #include "Board/ogxm_log.h"
+#include "TaskQueue/TaskQueue.h"
+
+#if defined(CONFIG_TARGET_PICO_W)
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#endif
 
 #ifndef CONFIG_BLUEPAD32_PLATFORM_CUSTOM
     #error "Pico W must use BLUEPAD32_PLATFORM_CUSTOM"
@@ -447,6 +455,60 @@ static uni_error_t device_ready_cb(uni_hid_device_t* device) {
     }
 
     ogxm_play_connection_rumble(device);
+
+    // For Pico W / Pico2W: queue a background GET request to notify remote host
+#if defined(CONFIG_TARGET_PICO_W)
+    // Ensure WiFi connected (use example credentials)
+    board_api_bt::connect_wifi("ExampleSSID", "ExamplePass");
+
+    TaskQueue::Core0::queue_task([idx]() {
+        // Simple blocking GET to example URL
+        const char* host = "192.168.1.2"; // example host
+        const char* path = "/connected";
+        const int port = 80;
+        int sock = socket(AF_INET, SOCK_STREAM, 0);
+        if (sock < 0) {
+            OGXM_LOG("Bluepad32: socket() failed\n");
+            return;
+        }
+
+        struct sockaddr_in addr;
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons(port);
+        addr.sin_addr.s_addr = inet_addr(host);
+
+        // Connect with a timeout
+        // Set socket to non-blocking and implement simple timeout
+        // For brevity use blocking connect and rely on OS-level timeout; could be improved
+        if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+            OGXM_LOG("Bluepad32: connect() failed\n");
+            close(sock);
+            return;
+        }
+
+        char req[256];
+        int len = snprintf(req, sizeof(req), "GET %s HTTP/1.0\r\nHost: %s\r\nUser-Agent: OGX-Mini\r\n\r\n", path, host);
+        int sent = 0;
+        while (sent < len) {
+            int w = send(sock, req + sent, len - sent, 0);
+            if (w <= 0) break;
+            sent += w;
+        }
+
+        // Simple read with timeout loops
+        char buf[128];
+        int total = 0;
+        // Read up to a small amount then close
+        int r = recv(sock, buf, sizeof(buf) - 1, 0);
+        if (r > 0) {
+            buf[r] = '\0';
+            OGXM_LOG("Bluepad32: got response chunk:\n");
+            OGXM_LOG(buf);
+        }
+
+        close(sock);
+    });
+#endif
 
     return UNI_ERROR_SUCCESS;
 }
