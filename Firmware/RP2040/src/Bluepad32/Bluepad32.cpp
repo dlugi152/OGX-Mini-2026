@@ -44,7 +44,7 @@ static constexpr uint32_t BT_INPUT_STALL_DISCONNECT_MS = 8000;
 static constexpr uint32_t XBOX_BLE_KEEPALIVE_MS = 12000;
 
 /** One-second rumble when a pad becomes ready so the user knows it is connected. */
-static constexpr uint16_t CONNECT_RUMBLE_DURATION_MS = 10000;
+static constexpr uint16_t CONNECT_RUMBLE_DURATION_MS = 1000;
 static constexpr uint8_t CONNECT_RUMBLE_WEAK = 160;
 static constexpr uint8_t CONNECT_RUMBLE_STRONG = 160;
 /** DS4: defer FF slightly — early output reports can destabilize the link (see s_ps4_rumble_ok_ms). */
