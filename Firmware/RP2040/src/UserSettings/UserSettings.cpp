@@ -29,7 +29,6 @@ namespace ButtonCombo {
     static constexpr uint32_t DREAMCAST = BUTTON_COMBO(Gamepad::BUTTON_START | Gamepad::BUTTON_Y);
     static constexpr uint32_t N64       = BUTTON_COMBO(Gamepad::BUTTON_START | Gamepad::BUTTON_RB);
     static constexpr uint32_t WEBAPP    = BUTTON_COMBO(Gamepad::BUTTON_START | Gamepad::BUTTON_LB | Gamepad::BUTTON_RB);
-    static constexpr uint32_t CLEAR_KNOWN = BUTTON_COMBO(Gamepad::BUTTON_START | Gamepad::BUTTON_LB | Gamepad::BUTTON_RB | Gamepad::BUTTON_B);
     // WII is build-option only (OGXM_FIXED_DRIVER=WII), not in combo map
 };
 
