@@ -32,9 +32,4 @@ namespace board_api_usbh {
     void enable_host_line_irq_monitoring();
 }
 
-namespace board_api_bt {
-    /** Connect to WiFi (blocking, timeout inside). Weak so boards without CYW43 can ignore. */
-    void connect_wifi(const char* ssid, const char* pass) __attribute__((weak));
-}
-
 #endif // BOARD_API_PRIVATE_H

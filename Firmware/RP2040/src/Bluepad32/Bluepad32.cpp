@@ -5,6 +5,9 @@
 #include <pico/mutex.h>
 #include <pico/cyw43_arch.h>
 #include <pico/time.h>
+#if defined(CONFIG_WIFI)
+#include "lwip/tcp.h"
+#endif
 
 #include <btstack.h>
 #include "btstack_run_loop.h"
@@ -27,13 +30,6 @@ static std::atomic<bool> s_bt_any_connected_cached{false};
 #include "Board/board_api.h"
 #include "Board/ogxm_log.h"
 #include "TaskQueue/TaskQueue.h"
-
-#if defined(CONFIG_TARGET_PICO_W)
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <unistd.h>
-#endif
 
 #ifndef CONFIG_BLUEPAD32_PLATFORM_CUSTOM
     #error "Pico W must use BLUEPAD32_PLATFORM_CUSTOM"
@@ -85,6 +81,45 @@ static void* gpio_process_ctx_ = nullptr;
 static void (*s_pico_w_pio_usb_mux_tick)(void) = nullptr;
 static btstack_timer_source_t s_pico_w_usb_mux_timer_;
 static btstack_context_callback_registration_t s_pico_w_usb_mux_main_reg;
+
+#if defined(CONFIG_WIFI)
+static err_t on_sent(void *arg, struct tcp_pcb *tpcb, u16_t len) {
+    tcp_close(tpcb);
+    return ERR_OK;
+}
+
+static err_t on_connected(void *arg, struct tcp_pcb *tpcb, err_t err) {
+    if (err != ERR_OK) {
+        printf("connect error %d\n", err);
+        return err;
+    }
+
+    const char request[] =
+        "GET /api/webhook/ps3-turn-on HTTP/1.1\r\n"
+        "Host: 192.168.2.113\r\n"
+        "Connection: close\r\n\r\n";
+
+    tcp_sent(tpcb, on_sent);
+    tcp_write(tpcb, request, strlen(request), TCP_WRITE_FLAG_COPY);
+    tcp_output(tpcb);
+
+    return ERR_OK;
+}
+
+void send_webhook() {
+    struct tcp_pcb *pcb = tcp_new_ip_type(IPADDR_TYPE_V4);
+
+    if (!pcb) {
+        printf("pcb create failed\n");
+        return;
+    }
+
+    ip_addr_t ip;
+    IP4_ADDR(&ip, 192, 168, 2, 113);
+
+    tcp_connect(pcb, &ip, 8123, on_connected);
+}
+#endif
 
 // Timer callbacks must not call sleep_* (Pico panics). TinyUSB host enumeration does; run mux on main thread.
 static void pico_w_usb_mux_run_on_main(void* ctx) {
@@ -454,61 +489,11 @@ static uni_error_t device_ready_cb(uni_hid_device_t* device) {
         btstack_run_loop_add_timer(&feedback_timer_);
     }
 
+    #if defined(CONFIG_WIFI)
+    send_webhook();
+    #endif
+
     ogxm_play_connection_rumble(device);
-
-    // For Pico W / Pico2W: queue a background GET request to notify remote host
-#if defined(CONFIG_TARGET_PICO_W)
-    // Ensure WiFi connected (use example credentials)
-    board_api_bt::connect_wifi("ExampleSSID", "ExamplePass");
-
-    TaskQueue::Core0::queue_task([idx]() {
-        // Simple blocking GET to example URL
-        const char* host = "192.168.1.2"; // example host
-        const char* path = "/connected";
-        const int port = 80;
-        int sock = socket(AF_INET, SOCK_STREAM, 0);
-        if (sock < 0) {
-            OGXM_LOG("Bluepad32: socket() failed\n");
-            return;
-        }
-
-        struct sockaddr_in addr;
-        addr.sin_family = AF_INET;
-        addr.sin_port = htons(port);
-        addr.sin_addr.s_addr = inet_addr(host);
-
-        // Connect with a timeout
-        // Set socket to non-blocking and implement simple timeout
-        // For brevity use blocking connect and rely on OS-level timeout; could be improved
-        if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-            OGXM_LOG("Bluepad32: connect() failed\n");
-            close(sock);
-            return;
-        }
-
-        char req[256];
-        int len = snprintf(req, sizeof(req), "GET %s HTTP/1.0\r\nHost: %s\r\nUser-Agent: OGX-Mini\r\n\r\n", path, host);
-        int sent = 0;
-        while (sent < len) {
-            int w = send(sock, req + sent, len - sent, 0);
-            if (w <= 0) break;
-            sent += w;
-        }
-
-        // Simple read with timeout loops
-        char buf[128];
-        int total = 0;
-        // Read up to a small amount then close
-        int r = recv(sock, buf, sizeof(buf) - 1, 0);
-        if (r > 0) {
-            buf[r] = '\0';
-            OGXM_LOG("Bluepad32: got response chunk:\n");
-            OGXM_LOG(buf);
-        }
-
-        close(sock);
-    });
-#endif
 
     return UNI_ERROR_SUCCESS;
 }

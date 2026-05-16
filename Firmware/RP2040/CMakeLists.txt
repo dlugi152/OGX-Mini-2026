@@ -128,8 +128,13 @@ endif()
 add_definitions(-DMAX_GAMEPADS=${MAX_GAMEPADS})
 
 set(OGXM_BOARD "PI_PICO" CACHE STRING "Set board type, options can be found in src/board_config.h")
+option(OGXM_WIFI "Enable Pico W / Pico 2 W Wi-Fi support (lwIP)" 1)
 set(FLASH_SIZE_MB 2)
 set(PICO_BOARD none)
+
+if(OGXM_WIFI AND NOT (OGXM_BOARD STREQUAL "PI_PICOW" OR OGXM_BOARD STREQUAL "PI_PICO2W"))
+    message(FATAL_ERROR "OGXM_WIFI is only supported on PI_PICOW or PI_PICO2W")
+endif()
 
 if (OGXM_BOARD STREQUAL "PI_PICO")
     add_compile_definitions(CONFIG_OGXM_BOARD_PI_PICO=1)
@@ -329,6 +334,18 @@ if(EN_BLUETOOTH)
     add_compile_definitions(CONFIG_EN_BLUETOOTH=1)
     message(STATUS "Bluetooth enabled.")
 
+    if(NOT DEFINED PICO_CYW43_ARCH_LIBRARY)
+        if(OGXM_WIFI)
+            set(PICO_CYW43_ARCH_LIBRARY pico_cyw43_arch_lwip_threadsafe_background CACHE INTERNAL "CYW43 arch target for Pico W Wi-Fi")
+        else()
+            set(PICO_CYW43_ARCH_LIBRARY pico_cyw43_arch_none CACHE INTERNAL "CYW43 arch target")
+        endif()
+    endif()
+    if(OGXM_WIFI)
+        add_compile_definitions(CONFIG_WIFI=1)
+        message(STATUS "Wi-Fi support enabled for Pico W / Pico 2 W.")
+    endif()
+
     generate_gatt_header(${BTSTACK_ROOT} ${SRC}/BLEServer/att_delayed_response.gatt ${SRC}/BLEServer/att_delayed_response.h)
     
     list(APPEND SOURCES_BOARD
@@ -341,7 +358,7 @@ if(EN_BLUETOOTH)
         ${BTSTACK_ROOT}/3rd-party/bluedroid/decoder/include
     )
     list(APPEND LIBS_BOARD
-        pico_cyw43_arch_none
+        ${PICO_CYW43_ARCH_LIBRARY}
         pico_btstack_classic
         pico_btstack_cyw43
         bluepad32
